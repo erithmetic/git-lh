@@ -1,0 +1,20 @@
+== git-lh - Lighthouse update script
+
+Original script at http://pastie.org/298043
+
+Added support for syncing remote branches.
+
+== Installation
+
+cp git-lh /usr/local/bin
+
+Add the following to your .git/config:
+
+[lighthouse]
+  token = your_lh_api_token
+  account = your_lh_account
+  project = your_lh_project_id
+
+== Usage
+
+Before pushing to a central repo, run git lh.  All commits not yet pushed will be logged to Lighthouse.

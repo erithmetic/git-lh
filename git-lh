@@ -1,0 +1,59 @@
+#!/usr/bin/env ruby
+# Install this script as "git-lh", alongside your git command (which git if you're unsure)
+# Based on http://pastie.org/178549 by <unknown>
+# Modified by vjt@openssl.it (http://github.com/vjt)
+
+require 'yaml'
+require 'cgi'
+require 'net/http'
+
+git = `which git`.strip
+branches = `#{git} branch`
+branches =~ /^\s*\*\s*(.*)$/
+current_branch = $1
+puts "Current branch is #{current_branch}"
+revs = `#{git} log --pretty=format:%H origin/#{current_branch}..HEAD`.split(/\n/).reverse
+
+if revs.size.zero?
+  puts "Already up-to-date."
+  exit 1
+end
+
+LIGHTHOUSE_TOKEN      = `#{git} config --get lighthouse.token`.chomp
+LIGHTHOUSE_ACCOUNT    = `#{git} config --get lighthouse.account`.chomp
+LIGHTHOUSE_PROJECT    = `#{git} config --get lighthouse.project`.chomp
+GITHUB_ACCOUNT, GITHUB_REPOSITORY = `#{git} remote -v`.scan(/(\w+)\/(\w+)\.git/).flatten
+
+puts "* Pushing #{revs.size} revisions to lighthouse"
+
+revs.each do |revision|
+  author   = `#{git} show --pretty=format:"%an" #{revision} | sed q`.chomp
+  log      = `#{git} show --pretty=format:"%s" #{revision}  | sed q`.chomp
+  date     = `#{git} show --pretty=format:"%aD" #{revision} | sed q`.chomp
+  diffstat = `#{git} diff --stat #{revision}^..#{revision}`.chomp.gsub(/\n/, '\&    ')
+  changed  = `#{git} diff-tree -r --name-status #{revision} | sed -n '$p'`
+  changes  = changed.split("\n").inject([]) { |memo, line| memo << [$1, $2] if line.strip =~ /(\w)\s+(.*)/ }.to_yaml
+
+  xml      = <<-EOF
+<changeset>
+  <title>#{CGI.escapeHTML("%s committed new changes to %s" % [author, GITHUB_REPOSITORY])}</title>
+  <body>
+    #{CGI.escapeHTML(log)}\n
+    #{"http://github.com/%s/%s/commit/%s" % [ GITHUB_ACCOUNT, GITHUB_REPOSITORY, revision ]}\n
+    #{CGI.escapeHTML(diffstat)}
+  </body>
+  <changes type="yaml">#{CGI.escapeHTML(changes)}</changes>
+  <revision>#{CGI.escapeHTML(revision)}</revision>
+  <changed-at type="datetime">#{CGI.escapeHTML(date.split('(').first.strip)}</changed-at>
+</changeset>
+  EOF
+
+  request = Net::HTTP::Post.new("/projects/#{LIGHTHOUSE_PROJECT}/changesets.xml")
+  request.set_content_type "application/xml"
+  request.basic_auth LIGHTHOUSE_TOKEN, "x"
+  request.body = xml
+  response = Net::HTTP.start("#{LIGHTHOUSE_ACCOUNT}.lighthouseapp.com").request(request)
+  
+  puts " Pushed rev #{revision} (#{log}). response: #{response.message}"
+  sleep 0.3
+end
